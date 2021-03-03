@@ -31,7 +31,7 @@ import {
   EVMOutput,
   ImportTx
 } from "avalanche/dist/apis/evm";
-import { Defaults } from "avalanche/dist/utils"
+import { Defaults, ONEAVAX } from "avalanche/dist/utils"
 import * as bip39 from 'bip39'
 import HDKey from 'hdkey'
 
@@ -45,20 +45,24 @@ const sleep = (ms: number): Promise<unknown> => {
   
 const config = require('../quickstart.config.json');
 let mnemonic: string = bip39.generateMnemonic(256)
-let avax_account_path: string = "m/44'/9000'/0'`"
-let eth_account_path: string = "m/44'/60'/0'`"
+let avaxAccountPath: string = "m/44'/9000'/0'`"
+let ethAccountPath: string = "m/44'/60'/0'`"
 let numAccounts: number = 20
+let seedAVAXAmount: number = 1000
 if(config.mnemonic && config.mnemonic !== "") {
   mnemonic = config.mnemonic
 }
-if(config.avax_account_path && config.avax_account_path !== "") {
-  avax_account_path = config.avax_account_path
+if(config.avaxAccountPath && config.avaxAccountPath !== "") {
+  avaxAccountPath = config.avaxAccountPath
 }
-if(config.eth_account_path && config.eth_account_path !== "") {
-  eth_account_path = config.eth_account_path
+if(config.ethAccountPath && config.ethAccountPath !== "") {
+  ethAccountPath = config.ethAccountPath
 }
 if(config.numAccounts && config.numAccounts !== "") {
   numAccounts = config.numAccounts
+}
+if(config.seedAVAXAmount && config.seedAVAXAmount !== "") {
+  seedAVAXAmount = config.seedAVAXAmount
 }
 const ip: string = "localhost"
 const port: number = 9650
@@ -74,33 +78,30 @@ const xKeychain: AVMKeyChain = xchain.keyChain()
 const cKeychain: KeyChain = cchain.keyChain()
 const output: any = {
   mnemonic: mnemonic,
-  avax_account_path: avax_account_path,
-  eth_account_path: eth_account_path,
+  avaxAccountPath: avaxAccountPath,
+  ethAccountPath: ethAccountPath,
   numAccounts: numAccounts,
   accounts: []
 }
+const whalePrivKey: string = "PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN"
+const whaleKeyPair: KeyPair = xKeychain.importKey(whalePrivKey)
+const axddressStrings: string[] = xKeychain.getAddressStrings()
 const privKeys: string[] = [
   "PrivateKey-ewoqjP7PxY4yr3iLTpLisriqt94hdyDFNgchSxGGztUrTXtNN"
 ]
-const cHexAddresses: string[] = [
-  "0x8db97C7cEcE249c2b98bDC0226Cc4C2A57BF52FC"
-]
-for(let i: number = 0; i <= config.numAccounts; i++) {
+const cHexAddresses: string[] = []
+const seed: globalThis.Buffer = bip39.mnemonicToSeedSync(mnemonic)
+const masterHdKey: HDKey = HDKey.fromMasterSeed(seed)
+for(let i: number = 0; i < config.numAccounts; i++) {
   const account: {
-    privKeyHex: string
-    privKeyBech32: string
-    addressHex: string 
-    addressBech32: string
+    privateKey: string
+    address: string 
   } = {
-    privKeyHex: "",
-    privKeyBech32: "",
-    addressHex: "",
-    addressBech32: "",
+    privateKey: "",
+    address: ""
   }
-  const seed: globalThis.Buffer = bip39.mnemonicToSeedSync(mnemonic)
-  const masterHdKey: HDKey = HDKey.fromMasterSeed(seed)
-  const accountHdKey: HDKey = masterHdKey.derive(`${avax_account_path}/0/${i}`)
-  const pk: string = accountHdKey.privateKey.toString('hex')
+  const hdKey: HDKey = masterHdKey.derive(`${ethAccountPath}/0/${i}`)
+  const pk: string = hdKey.privateKey.toString('hex')
   const p: Buffer = Buffer.from(pk)
 
   const keyPair: KeyPair = tmpXKeychain.importKey(p)
@@ -112,24 +113,21 @@ for(let i: number = 0; i <= config.numAccounts; i++) {
     sign: Function,
     encrypt: Function
   } = web3.eth.accounts.privateKeyToAccount(privKeyHex);
-  account.addressHex = a.address
-  account.privKeyHex = privKeyHex
-  account.addressBech32 = keyPair.getAddressString()
-  account.privKeyBech32 = keyPair.getPrivateKeyString()
+  account.address= a.address
+  account.privateKey= privKeyHex
   output.accounts.push(account)
-  // privKeys.push(keyPair.getPrivateKeyString())
   cHexAddresses.push(a.address)
 }
-// console.log(privKeys)
+const numCHexAddresses: number = cHexAddresses.length
 const data: string = JSON.stringify(output);
 fs.writeFileSync('output.json', data);
   
 privKeys.forEach((privKey: string) => {
-  xKeychain.importKey(privKey)
   cKeychain.importKey(privKey)
 })
-const xAddresses: Buffer[] = xchain.keyChain().getAddresses()
-const xAddressStrings: string[] = xchain.keyChain().getAddressStrings().reverse()
+const xAddresses: Buffer[] = xKeychain.getAddresses()
+// console.log(xAddresses)
+const xAddressStrings: string[] = xKeychain.getAddressStrings().reverse()
 // console.log(xAddressStrings)
 const cAddressStrings: string[] = cchain.keyChain().getAddressStrings()
 const cAddresses: Buffer[] = cchain.keyChain().getAddresses()
@@ -148,8 +146,6 @@ const threshold: number = 1
 const memo: Buffer = bintools.stringToBuffer("AVM utility method buildExportTx to export AVAX to the C-Chain from the X-Chain")
             
 const main = async (): Promise<any> => {
-  // console.log("-------huh")
-  return false
   const avaxAssetID: Buffer = await xchain.getAVAXAssetID()
   const getBalanceResponse: any = await xchain.getBalance(xAddressStrings[0], bintools.cb58Encode(avaxAssetID))
   const balance: BN = new BN(getBalanceResponse.balance)
@@ -157,12 +153,13 @@ const main = async (): Promise<any> => {
   const avmUTXOSet: AVMUTXOSet = avmUTXOResponse.utxos
   const avmUTXOs: AVMUTXO[] = avmUTXOSet.getAllUTXOs()
   // 1,000 AVAX
+  ONEAVAX
   const amount: BN = new BN(1000000000000)
   console.log("Exporting 1000 AVAX to each address on the C-Chain...")
-  let secpTransferOutput: AVMSECPTransferOutput = new AVMSECPTransferOutput(amount.mul(new BN(10)), [cAddresses[0]], locktime, threshold)
+  let secpTransferOutput: AVMSECPTransferOutput = new AVMSECPTransferOutput(amount.mul(new BN(numCHexAddresses)), [cAddresses[0]], locktime, threshold)
   let transferableOutput: AVMTransferableOutput = new AVMTransferableOutput(avaxAssetID, secpTransferOutput)
   exportedOuts.push(transferableOutput)
-  secpTransferOutput = new AVMSECPTransferOutput(balance.sub(amount.mul(new BN(10))).sub(fee), xAddresses, locktime, threshold)
+  secpTransferOutput = new AVMSECPTransferOutput(balance.sub(amount.mul(new BN(numCHexAddresses))).sub(fee), xAddresses, locktime, threshold)
   transferableOutput = new AVMTransferableOutput(avaxAssetID, secpTransferOutput)
   outputs.push(transferableOutput)
   
@@ -190,41 +187,41 @@ const main = async (): Promise<any> => {
   const avmTXID: string = await xchain.issueTx(avmTx)
   console.log(avmTXID)
   
-  await sleep(mstimeout)
+  // await sleep(mstimeout)
   
-  console.log("Importing AVAX to the C-Chain...")
-  const u: any = await cchain.getUTXOs(cAddressStrings[0], "X")
-  const utxoSet: EVMUTXOSet = u.utxos
-  const utxos: EVMUTXO[] = utxoSet.getAllUTXOs()
-  utxos.forEach((utxo: EVMUTXO, index: number) => {
-    const assetID: Buffer = utxo.getAssetID() 
-    const txid: Buffer = utxo.getTxID()
-    const outputidx: Buffer = utxo.getOutputIdx()
-    const output: AmountOutput = utxo.getOutput() as AmountOutput
-    const amt: BN = output.getAmount().clone()
-    const input: EVMSECPTransferInput = new EVMSECPTransferInput(amt)
-    input.addSignatureIdx(0, cAddresses[0])
-    const xferin: EVMTransferableInput = new EVMTransferableInput(txid, outputidx, assetID, input)
-    importedIns.push(xferin)
+  // console.log("Importing AVAX to the C-Chain...")
+  // const u: any = await cchain.getUTXOs(cAddressStrings[0], "X")
+  // const utxoSet: EVMUTXOSet = u.utxos
+  // const utxos: EVMUTXO[] = utxoSet.getAllUTXOs()
+  // utxos.forEach((utxo: EVMUTXO, index: number) => {
+  //   const assetID: Buffer = utxo.getAssetID() 
+  //   const txid: Buffer = utxo.getTxID()
+  //   const outputidx: Buffer = utxo.getOutputIdx()
+  //   const output: AmountOutput = utxo.getOutput() as AmountOutput
+  //   const amt: BN = output.getAmount().clone()
+  //   const input: EVMSECPTransferInput = new EVMSECPTransferInput(amt)
+  //   input.addSignatureIdx(0, cAddresses[0])
+  //   const xferin: EVMTransferableInput = new EVMTransferableInput(txid, outputidx, assetID, input)
+  //   importedIns.push(xferin)
   
-    cHexAddresses.forEach((cHexAddress: string) => {
-    const evmOutput: EVMOutput = new EVMOutput(cHexAddress, amt.div(new BN(10)), assetID)
-    evmOutputs.push(evmOutput)
-    })
-  })
+  //   cHexAddresses.forEach((cHexAddress: string) => {
+  //   const evmOutput: EVMOutput = new EVMOutput(cHexAddress, amt.div(new BN(numCHexAddresses)), assetID)
+  //   evmOutputs.push(evmOutput)
+  //   })
+  // })
         
-  const importTx: ImportTx = new ImportTx(
-    networkID,
-    cChainBlockchainIdBuf,
-    xChainBlockchainIdBuf,
-    importedIns,
-    evmOutputs
-  )
+  // const importTx: ImportTx = new ImportTx(
+  //   networkID,
+  //   cChainBlockchainIdBuf,
+  //   xChainBlockchainIdBuf,
+  //   importedIns,
+  //   evmOutputs
+  // )
   
-  const evmUnsignedTx: EVMUnsignedTx = new EVMUnsignedTx(importTx)
-  const evmTx: EVMTx = evmUnsignedTx.sign(cKeychain)
-  const evmTXID: string = await cchain.issueTx(evmTx)
-  console.log(evmTXID)
+  // const evmUnsignedTx: EVMUnsignedTx = new EVMUnsignedTx(importTx)
+  // const evmTx: EVMTx = evmUnsignedTx.sign(cKeychain)
+  // const evmTXID: string = await cchain.issueTx(evmTx)
+  // console.log(evmTXID)
 }
           
 main()
